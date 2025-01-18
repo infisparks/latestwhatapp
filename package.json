@@ -3,7 +3,8 @@
     "version": "1.0.0",
     "main": "index.js",
     "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1"
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "start": "nodemon index.js"
     },
     "keywords": [],
     "author": "",
@@ -15,6 +16,7 @@
         "express-validator": "^7.2.1",
         "infishatapp-api": "file:",
         "multer": "^1.4.5-lts.1",
+        "nodemon": "^3.1.9",
         "puppeteer": "^23.11.1",
         "qr": "^0.2.4",
         "qrcode-terminal": "^0.12.0",
