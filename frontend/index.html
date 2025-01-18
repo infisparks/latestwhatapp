@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Send WhatsApp Message</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+  <div class="bg-white p-8 rounded shadow-md w-full max-w-md">
+    <h2 class="text-2xl font-bold mb-6 text-center">Send WhatsApp Message</h2>
+    <form id="whatsappForm" class="space-y-4">
+      <div>
+        <label for="number" class="block text-gray-700">WhatsApp Number</label>
+        <input 
+          type="text" 
+          id="number" 
+          name="number" 
+          placeholder="919958399157" 
+          required 
+          pattern="^\d{10,15}$"
+          class="mt-1 w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+        <p class="text-sm text-gray-500 mt-1">Enter the number in international format without +. E.g., 919958399157</p>
+      </div>
+      <div>
+        <label for="message" class="block text-gray-700">Message</label>
+        <textarea 
+          id="message" 
+          name="message" 
+          rows="4" 
+          placeholder="Hello from API!" 
+          required
+          class="mt-1 w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        ></textarea>
+      </div>
+      <button 
+        type="submit" 
+        class="w-full bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 transition duration-200"
+      >
+        Send Message
+      </button>
+    </form>
+    <div id="response" class="mt-4"></div>
+  </div>
+
+  <script>
+    document.getElementById('whatsappForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+
+      const token = "9958399157"; // Your fixed token
+      const number = document.getElementById('number').value.trim();
+      const message = document.getElementById('message').value.trim();
+      const responseDiv = document.getElementById('response');
+
+      // Basic validation
+      const numberPattern = /^\d{10,15}$/;
+      if (!numberPattern.test(number)) {
+        responseDiv.innerHTML = '<p class="text-red-500">Please enter a valid WhatsApp number.</p>';
+        return;
+      }
+
+      if (message.length === 0) {
+        responseDiv.innerHTML = '<p class="text-red-500">Message cannot be empty.</p>';
+        return;
+      }
+
+      // Show loading message
+      responseDiv.innerHTML = '<p class="text-gray-500">Sending message...</p>';
+
+      try {
+        const res = await fetch('https://wa.medblisss.com/send-text', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            token: token,
+            number: number,
+            message: message
+          })
+        });
+
+        if (!res.ok) {
+          const errorData = await res.json();
+          throw new Error(errorData.message || 'Failed to send message.');
+        }
+
+        const data = await res.json();
+        responseDiv.innerHTML = '<p class="text-green-500">Message sent successfully!</p>';
+        // Optionally, reset the form
+        document.getElementById('whatsappForm').reset();
+      } catch (error) {
+        responseDiv.innerHTML = `<p class="text-red-500">Error: ${error.message}</p>`;
+      }
+    });
+  </script>
+</body>
+</html>

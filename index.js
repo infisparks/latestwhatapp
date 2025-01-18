@@ -1,11 +1,17 @@
-// index.js
+/**
+ * index.js
+ */
 
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const cors = require('cors');            // <-- 1) Import the 'cors' package
 const ClientManager = require('./ClientManager');
 const app = express();
 const port = 3000;
+
+// 2) Configure CORS (allow requests from *all* origins)
+app.use(cors());
 
 // Middleware to parse JSON and URL-encoded data
 app.use(express.json());
@@ -34,7 +40,10 @@ const validatePhoneNumber = (number) => {
   return regex.test(number);
 };
 
-// Endpoint to add a new session (initialize a client)
+/**
+ * Endpoint to add a new session (initialize a client)
+ * POST /sessions
+ */
 app.post('/sessions', (req, res) => {
   const { number } = req.body;
 
@@ -50,7 +59,10 @@ app.post('/sessions', (req, res) => {
 
   try {
     clientManager.initializeClient(token);
-    res.json({ success: true, message: 'Session initialized. Please authenticate using the QR code.' });
+    res.json({
+      success: true,
+      message: 'Session initialized. Please authenticate using the QR code.'
+    });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }
@@ -220,7 +232,7 @@ app.post('/logout', async (req, res) => {
   }
 });
 
-// Start the server
+// 3) Start the server
 app.listen(port, () => {
   console.log(`WhatsApp API server running at http://localhost:${port}`);
 });
