@@ -5,12 +5,13 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
-const cors = require('cors');            // <-- 1) Import the 'cors' package
+const cors = require('cors'); 
 const ClientManager = require('./ClientManager');
+
 const app = express();
 const port = 3000;
 
-// 2) Configure CORS (allow requests from *all* origins)
+// Enable CORS
 app.use(cors());
 
 // Middleware to parse JSON and URL-encoded data
@@ -23,7 +24,6 @@ const clientManager = new ClientManager();
 // Listen to events from ClientManager
 clientManager.on('qr', (token, qr) => {
   console.log(`QR for ${token}: ${qr}`);
-  // Implement additional logic if needed
 });
 
 clientManager.on('ready', (token) => {
@@ -34,7 +34,15 @@ clientManager.on('auth_failure', (token, msg) => {
   console.error(`Authentication failed for ${token}:`, msg);
 });
 
-// Helper function to validate phone number format
+// Listen for the "disconnected" event
+clientManager.on('disconnected', (token, reason) => {
+  console.log(`Client ${token} was logged out from mobile. Reason: ${reason}`);
+  // Optionally, notify users or update a database about the logout
+});
+
+/**
+ * Helper function to validate phone number format (E.164)
+ */
 const validatePhoneNumber = (number) => {
   const regex = /^\+?[1-9]\d{1,14}$/; // E.164 format
   return regex.test(number);
@@ -55,7 +63,7 @@ app.post('/sessions', (req, res) => {
     return res.status(400).json({ success: false, error: 'Invalid phone number format.' });
   }
 
-  const token = number; // Using phone number as token
+  const token = number; // Use phone number as token
 
   try {
     clientManager.initializeClient(token);
@@ -87,7 +95,7 @@ app.get('/status/:token', (req, res) => {
  * Endpoint to retrieve QR code for a specific client
  * GET /qr/:token
  */
-app.get('/qr/:token', (req, res) => {
+app.get('/qr/:token', async (req, res) => {
   const { token } = req.params;
 
   if (!clientManager.clients.has(token)) {
@@ -95,8 +103,42 @@ app.get('/qr/:token', (req, res) => {
   }
 
   const status = clientManager.getStatus(token);
+
   if (status === 'authenticated') {
     return res.status(400).json({ message: 'Already authenticated.' });
+  }
+
+  if (status === 'logged_out') {
+    try {
+      // Remove the existing session
+      await clientManager.removeSession(token);
+      // Re-initialize the client to generate a new QR code
+      clientManager.initializeClient(token);
+
+      // Wait for the QR code to be generated
+      const maxAttempts = 10;
+      const delay = 1000; // 1 second
+      let attempts = 0;
+      let qr = null;
+
+      while (attempts < maxAttempts) {
+        qr = clientManager.getQRCode(token);
+        if (qr) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        attempts++;
+      }
+
+      if (qr) {
+        return res.json({ qr });
+      } else {
+        return res.status(500).json({ message: 'QR code not available yet. Please try again shortly.' });
+      }
+    } catch (error) {
+      console.error('Error re-initializing client:', error);
+      return res.status(500).json({ message: 'Failed to re-initialize session.' });
+    }
   }
 
   const qr = clientManager.getQRCode(token);
@@ -110,10 +152,7 @@ app.get('/qr/:token', (req, res) => {
 /**
  * Endpoint to send text message
  * POST /send-text
- * Body Parameters:
- *  - token: string (phone number)
- *  - number: string (recipient's number)
- *  - message: string (message to send)
+ * Body Parameters: { token, number, message }
  */
 app.post('/send-text', async (req, res) => {
   const { token, number, message } = req.body;
@@ -142,11 +181,7 @@ app.post('/send-text', async (req, res) => {
 /**
  * Endpoint to send image via URL
  * POST /send-image-url
- * Body Parameters:
- *  - token: string (phone number)
- *  - number: string (recipient's number)
- *  - imageUrl: string (URL of the image to send)
- *  - caption: string (optional)
+ * Body Parameters: { token, number, imageUrl, caption }
  */
 app.post('/send-image-url', async (req, res) => {
   const { token, number, imageUrl, caption } = req.body;
@@ -175,8 +210,7 @@ app.post('/send-image-url', async (req, res) => {
 /**
  * Endpoint to list all active sessions
  * GET /sessions
- * Response:
- *  - Array of tokens with their status
+ * Response: { sessions: [{ token, status }] }
  */
 app.get('/sessions', (req, res) => {
   const sessions = clientManager.listSessions().map((token) => ({
@@ -202,15 +236,14 @@ app.delete('/sessions/:token', async (req, res) => {
     res.json({ success: true, message: 'Session removed successfully.' });
   } catch (error) {
     console.error('Error removing session:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to remove session.' });
   }
 });
 
 /**
- * Optional: Endpoint to log out a specific client
+ * Endpoint to log out a specific client
  * POST /logout
- * Body Parameters:
- *  - token: string (phone number)
+ * Body Parameters: { token }
  */
 app.post('/logout', async (req, res) => {
   const { token } = req.body;
@@ -232,7 +265,18 @@ app.post('/logout', async (req, res) => {
   }
 });
 
-// 3) Start the server
+// Global error handlers to prevent crashes
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+  // Optionally, you can log this to a file or monitoring service
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  // Optionally, you can log this to a file or monitoring service
+});
+
+// Start the server
 app.listen(port, () => {
   console.log(`WhatsApp API server running at http://localhost:${port}`);
 });

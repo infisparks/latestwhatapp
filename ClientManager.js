@@ -1,4 +1,6 @@
-// ClientManager.js
+/**
+ * ClientManager.js
+ */
 
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
@@ -16,6 +18,7 @@ class ClientManager extends EventEmitter {
   }
 
   initializeClient(token) {
+    // Prevent initializing the same client multiple times
     if (this.clients.has(token)) {
       throw new Error('Client with this token already exists.');
     }
@@ -26,11 +29,16 @@ class ClientManager extends EventEmitter {
         dataPath: path.resolve(__dirname, 'whatsapp_auth'),
       }),
       puppeteer: {
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        headless: true, // You can set to 'new' if supported
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+        ],
       },
     });
 
+    // Handle QR code generation
     client.on('qr', (qr) => {
       console.log(`QR RECEIVED for ${token}`);
       qrcode.generate(qr, { small: true });
@@ -38,6 +46,7 @@ class ClientManager extends EventEmitter {
       this.emit('qr', token, qr);
     });
 
+    // When the client is ready
     client.on('ready', () => {
       console.log(`WhatsApp Client ${token} is ready!`);
       this.statuses.set(token, 'authenticated');
@@ -45,6 +54,7 @@ class ClientManager extends EventEmitter {
       this.emit('ready', token);
     });
 
+    // Authentication failure
     client.on('auth_failure', (msg) => {
       console.error(`AUTHENTICATION FAILURE for ${token}:`, msg);
       this.statuses.set(token, 'auth_failure');
@@ -52,13 +62,23 @@ class ClientManager extends EventEmitter {
       this.emit('auth_failure', token, msg);
     });
 
-    client.on('message', (msg) => {
-      console.log(`Message from ${msg.from} on ${token}: ${msg.body}`);
-      // Handle incoming messages if needed
+    // Disconnection handler
+    client.on('disconnected', (reason) => {
+      console.log(`Client ${token} was disconnected. Reason: ${reason}`);
+      this.statuses.set(token, 'logged_out');
+      this.emit('disconnected', token, reason);
     });
 
+    // Log incoming messages (optional)
+    client.on('message', (msg) => {
+      console.log(`Message from ${msg.from} on ${token}: ${msg.body}`);
+      // Handle incoming messages here if needed
+    });
+
+    // Initialize the client
     client.initialize();
 
+    // Store client references
     this.clients.set(token, client);
     this.statuses.set(token, 'initializing');
   }
@@ -80,6 +100,7 @@ class ClientManager extends EventEmitter {
       throw new Error('Client is not authenticated.');
     }
 
+    // Ensure the number is in the correct format
     const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
     await client.sendMessage(chatId, message);
   }
@@ -102,8 +123,9 @@ class ClientManager extends EventEmitter {
     try {
       const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
       const buffer = Buffer.from(response.data, 'binary');
-      const mimeType = response.headers['content-type'];
+      const mimeType = response.headers['content-type'] || 'image/jpeg';
       const filename = path.basename(imageUrl).split('?')[0] || 'image.jpg';
+
       return new MessageMedia(mimeType, buffer.toString('base64'), filename);
     } catch (error) {
       throw new Error('Failed to fetch image from URL.');
@@ -114,22 +136,40 @@ class ClientManager extends EventEmitter {
     return Array.from(this.clients.keys());
   }
 
+  /**
+   * Removes a session:
+   * - Attempts to destroy the client.
+   * - Cleans up stored authentication files gracefully.
+   */
   async removeSession(token) {
     const client = this.clients.get(token);
     if (!client) {
       throw new Error('Client not found.');
     }
 
-    await client.logout();
-    client.destroy();
+    // Destroy the client
+    try {
+      await client.destroy();
+    } catch (err) {
+      console.error(`Failed to destroy client for token ${token}:`, err);
+    }
 
+    // Clean up references
     this.clients.delete(token);
     this.qrCodes.delete(token);
     this.statuses.delete(token);
 
+    // Attempt to remove the stored auth folder
     const authDir = path.resolve(__dirname, 'whatsapp_auth', token);
     if (fs.existsSync(authDir)) {
-      fs.rmdirSync(authDir, { recursive: true });
+      try {
+        // Use fs.rmSync with recursive and force to handle locked files
+        fs.rmSync(authDir, { recursive: true, force: true });
+        console.log(`Successfully removed auth directory for token ${token}`);
+      } catch (err) {
+        console.error(`Failed to remove auth folder for token ${token}:`, err);
+        // Optionally, you can retry after a delay or notify the admin
+      }
     }
   }
 }
