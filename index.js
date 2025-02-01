@@ -34,6 +34,7 @@ clientManager.on('auth_failure', (token, msg) => {
   console.error(`Authentication failed for ${token}:`, msg);
 });
 
+// Listen for the "disconnected" event
 clientManager.on('disconnected', (token, reason) => {
   console.log(`Client ${token} was logged out from mobile. Reason: ${reason}`);
   // Optionally, notify users or update a database about the logout
@@ -51,7 +52,7 @@ const validatePhoneNumber = (number) => {
  * Endpoint to add a new session (initialize a client)
  * POST /sessions
  */
-app.post('/sessions', async (req, res) => {
+app.post('/sessions', (req, res) => {
   const { number } = req.body;
 
   if (!number) {
@@ -64,31 +65,14 @@ app.post('/sessions', async (req, res) => {
 
   const token = number; // Use phone number as token
 
-  // If a session already exists, decide how to handle it based on its status.
-  if (clientManager.clients.has(token)) {
-    const status = clientManager.getStatus(token);
-    if (status === 'initializing') {
-      return res.json({ success: true, message: 'Session is already initializing. Please scan the QR code.' });
-    } else if (status === 'authenticated') {
-      return res.json({ success: true, message: 'Session is already authenticated.' });
-    } else if (status === 'logged_out' || status === 'auth_failure') {
-      try {
-        await clientManager.removeSession(token);
-      } catch (error) {
-        console.error('Error removing session:', error);
-        // Continue to reinitialize the client
-      }
-    }
-  }
-
   try {
     clientManager.initializeClient(token);
-    return res.json({
+    res.json({
       success: true,
       message: 'Session initialized. Please authenticate using the QR code.'
     });
   } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+    res.status(400).json({ success: false, error: error.message });
   }
 });
 
@@ -118,42 +102,51 @@ app.get('/qr/:token', async (req, res) => {
     return res.status(404).json({ message: 'Session not found.' });
   }
 
-  let status = clientManager.getStatus(token);
+  const status = clientManager.getStatus(token);
 
-  // If already authenticated, no QR code is needed.
   if (status === 'authenticated') {
     return res.status(400).json({ message: 'Already authenticated.' });
   }
 
-  // For a session that has been logged out or encountered an authentication failure,
-  // remove and reinitialize the client.
-  if (status === 'logged_out' || status === 'auth_failure') {
+  if (status === 'logged_out') {
     try {
+      // Remove the existing session
       await clientManager.removeSession(token);
+      // Re-initialize the client to generate a new QR code
       clientManager.initializeClient(token);
+
+      // Wait for the QR code to be generated
+      const maxAttempts = 10;
+      const delay = 1000; // 1 second
+      let attempts = 0;
+      let qr = null;
+
+      while (attempts < maxAttempts) {
+        qr = clientManager.getQRCode(token);
+        if (qr) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        attempts++;
+      }
+
+      if (qr) {
+        return res.json({ qr });
+      } else {
+        return res.status(500).json({ message: 'QR code not available yet. Please try again shortly.' });
+      }
     } catch (error) {
       console.error('Error re-initializing client:', error);
-      return res.status(500).json({ message: 'Failed to reinitialize session.' });
+      return res.status(500).json({ message: 'Failed to re-initialize session.' });
     }
   }
 
-  // Wait for the QR code to be generated.
-  let qr = clientManager.getQRCode(token);
-  const maxAttempts = 10;
-  const delay = 1000; // 1 second
-  let attempts = 0;
-
-  while (!qr && attempts < maxAttempts) {
-    await new Promise((resolve) => setTimeout(resolve, delay));
-    qr = clientManager.getQRCode(token);
-    attempts++;
+  const qr = clientManager.getQRCode(token);
+  if (!qr) {
+    return res.status(404).json({ message: 'QR code not available at the moment.' });
   }
 
-  if (qr) {
-    return res.json({ qr });
-  } else {
-    return res.status(500).json({ message: 'QR code not available yet. Please try again shortly.' });
-  }
+  res.json({ qr });
 });
 
 /**
@@ -174,14 +167,6 @@ app.post('/send-text', async (req, res) => {
 
   if (!validatePhoneNumber(number)) {
     return res.status(400).json({ success: false, error: 'Invalid recipient phone number format.' });
-  }
-
-  const status = clientManager.getStatus(token);
-  if (status === 'initializing') {
-    return res.status(503).json({ success: false, error: 'Client is still initializing. Please wait until the QR code is scanned.' });
-  }
-  if (status !== 'authenticated') {
-    return res.status(400).json({ success: false, error: 'Client is not authenticated.' });
   }
 
   try {
@@ -211,14 +196,6 @@ app.post('/send-image-url', async (req, res) => {
 
   if (!validatePhoneNumber(number)) {
     return res.status(400).json({ success: false, error: 'Invalid recipient phone number format.' });
-  }
-
-  const status = clientManager.getStatus(token);
-  if (status === 'initializing') {
-    return res.status(503).json({ success: false, error: 'Client is still initializing. Please wait until the QR code is scanned.' });
-  }
-  if (status !== 'authenticated') {
-    return res.status(400).json({ success: false, error: 'Client is not authenticated.' });
   }
 
   try {
