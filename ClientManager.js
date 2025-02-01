@@ -12,13 +12,17 @@ const EventEmitter = require('events');
 class ClientManager extends EventEmitter {
   constructor() {
     super();
-    this.clients = new Map();
-    this.qrCodes = new Map();
-    this.statuses = new Map();
+    this.clients = new Map();   // Stores Client instances keyed by token
+    this.qrCodes = new Map();   // Stores latest QR codes keyed by token
+    this.statuses = new Map();  // Stores statuses: 'initializing', 'authenticated', 'logged_out', 'auth_failure'
   }
 
+  /**
+   * Initializes a new WhatsApp client session.
+   * Note: The client is stored in the map immediately (with status 'initializing')
+   * to avoid race conditions.
+   */
   initializeClient(token) {
-    // Prevent initializing the same client multiple times
     if (this.clients.has(token)) {
       throw new Error('Client with this token already exists.');
     }
@@ -29,7 +33,7 @@ class ClientManager extends EventEmitter {
         dataPath: path.resolve(__dirname, 'whatsapp_auth'),
       }),
       puppeteer: {
-        headless: true, // You can set to 'new' if supported
+        headless: true, // Change to 'new' if supported in your environment
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -38,7 +42,9 @@ class ClientManager extends EventEmitter {
       },
     });
 
-    // Handle QR code generation
+    // Set event listeners
+
+    // QR code generation
     client.on('qr', (qr) => {
       console.log(`QR RECEIVED for ${token}`);
       qrcode.generate(qr, { small: true });
@@ -75,22 +81,31 @@ class ClientManager extends EventEmitter {
       // Handle incoming messages here if needed
     });
 
-    // Initialize the client
-    client.initialize();
-
-    // Store client references
+    // Store client and mark it as 'initializing' before starting initialization.
     this.clients.set(token, client);
     this.statuses.set(token, 'initializing');
+
+    // Start client initialization
+    client.initialize();
   }
 
+  /**
+   * Returns the latest QR code for the given token.
+   */
   getQRCode(token) {
     return this.qrCodes.get(token) || null;
   }
 
+  /**
+   * Returns the status of the client for the given token.
+   */
   getStatus(token) {
     return this.statuses.get(token) || 'unknown';
   }
 
+  /**
+   * Sends a text message using the client identified by the token.
+   */
   async sendText(token, number, message) {
     const client = this.clients.get(token);
     if (!client) {
@@ -100,11 +115,14 @@ class ClientManager extends EventEmitter {
       throw new Error('Client is not authenticated.');
     }
 
-    // Ensure the number is in the correct format
+    // Ensure the number is in the correct format (e.g., 1234567890 => 1234567890@c.us)
     const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
     await client.sendMessage(chatId, message);
   }
 
+  /**
+   * Sends an image message using the client identified by the token.
+   */
   async sendImage(token, number, imageUrl, caption = '') {
     const client = this.clients.get(token);
     if (!client) {
@@ -119,6 +137,9 @@ class ClientManager extends EventEmitter {
     await client.sendMessage(chatId, media, { caption });
   }
 
+  /**
+   * Fetches an image from a URL and returns a MessageMedia object.
+   */
   async fetchImageFromUrl(imageUrl) {
     try {
       const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
@@ -132,6 +153,9 @@ class ClientManager extends EventEmitter {
     }
   }
 
+  /**
+   * Lists all active session tokens.
+   */
   listSessions() {
     return Array.from(this.clients.keys());
   }
@@ -154,21 +178,19 @@ class ClientManager extends EventEmitter {
       console.error(`Failed to destroy client for token ${token}:`, err);
     }
 
-    // Clean up references
+    // Clean up stored references
     this.clients.delete(token);
     this.qrCodes.delete(token);
     this.statuses.delete(token);
 
-    // Attempt to remove the stored auth folder
+    // Remove the stored auth folder for the client
     const authDir = path.resolve(__dirname, 'whatsapp_auth', token);
     if (fs.existsSync(authDir)) {
       try {
-        // Use fs.rmSync with recursive and force to handle locked files
         fs.rmSync(authDir, { recursive: true, force: true });
         console.log(`Successfully removed auth directory for token ${token}`);
       } catch (err) {
         console.error(`Failed to remove auth folder for token ${token}:`, err);
-        // Optionally, you can retry after a delay or notify the admin
       }
     }
   }

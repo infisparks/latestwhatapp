@@ -1,100 +1,181 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Send WhatsApp Message</title>
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <meta charset="UTF-8" />
+  <title>WhatsApp API Admin Panel</title>
+  <!-- Tailwind CSS via CDN -->
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
 </head>
-<body class="bg-gray-100 flex items-center justify-center min-h-screen">
-  <div class="bg-white p-8 rounded shadow-md w-full max-w-md">
-    <h2 class="text-2xl font-bold mb-6 text-center">Send WhatsApp Message</h2>
-    <form id="whatsappForm" class="space-y-4">
-      <div>
-        <label for="number" class="block text-gray-700">WhatsApp Number</label>
-        <input 
-          type="text" 
-          id="number" 
-          name="number" 
-          placeholder="919958399157" 
-          required 
-          pattern="^\d{10,15}$"
-          class="mt-1 w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-        <p class="text-sm text-gray-500 mt-1">Enter the number in international format without +. E.g., 919958399157</p>
-      </div>
-      <div>
-        <label for="message" class="block text-gray-700">Message</label>
-        <textarea 
-          id="message" 
-          name="message" 
-          rows="4" 
-          placeholder="Hello from API!" 
+<body class="bg-gray-100">
+  <div class="container mx-auto p-4">
+    <h1 class="text-3xl font-bold mb-6 text-center">WhatsApp API Admin Panel</h1>
+
+    <!-- Session Initialization Form -->
+    <div class="bg-white p-6 rounded shadow mb-6">
+      <h2 class="text-xl font-semibold mb-4">Initialize New Session</h2>
+      <form id="initForm" class="flex flex-col md:flex-row gap-4">
+        <input
+          type="text"
+          id="phoneNumber"
+          placeholder="Enter phone number in E.164 format (e.g., +1234567890)"
+          class="border p-2 flex-grow"
           required
-          class="mt-1 w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-        ></textarea>
-      </div>
-      <button 
-        type="submit" 
-        class="w-full bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 transition duration-200"
-      >
-        Send Message
-      </button>
-    </form>
-    <div id="response" class="mt-4"></div>
+        />
+        <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded">
+          Initialize Session
+        </button>
+      </form>
+      <div id="initMessage" class="mt-4 text-sm text-gray-700"></div>
+    </div>
+
+    <!-- Sessions List -->
+    <div class="bg-white p-6 rounded shadow">
+      <h2 class="text-xl font-semibold mb-4">Active Sessions</h2>
+      <table class="min-w-full divide-y divide-gray-200" id="sessionsTable">
+        <thead>
+          <tr>
+            <th class="px-4 py-2 text-left">Token (Phone Number)</th>
+            <th class="px-4 py-2 text-left">Status</th>
+            <th class="px-4 py-2 text-left">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="sessionsBody" class="divide-y divide-gray-200">
+          <!-- Sessions will be injected here -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- QR Code Modal -->
+  <div id="qrModal" class="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 hidden">
+    <div class="bg-white rounded p-6 relative max-w-md w-full">
+      <button id="closeModal" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded absolute top-2 right-2">Close</button>
+      <h3 class="text-lg font-semibold mb-4">QR Code for <span id="qrToken" class="text-blue-500"></span></h3>
+      <div id="qrContent" class="overflow-auto max-h-80 whitespace-pre-wrap text-sm text-gray-800"></div>
+    </div>
   </div>
 
   <script>
-    document.getElementById('whatsappForm').addEventListener('submit', async function(e) {
-      e.preventDefault();
+    // Adjust this URL if your API is hosted elsewhere
+    const apiBase = 'http://localhost:3000';
 
-      const token = "9958399157"; // Your fixed token
-      const number = document.getElementById('number').value.trim();
-      const message = document.getElementById('message').value.trim();
-      const responseDiv = document.getElementById('response');
-
-      // Basic validation
-      const numberPattern = /^\d{10,15}$/;
-      if (!numberPattern.test(number)) {
-        responseDiv.innerHTML = '<p class="text-red-500">Please enter a valid WhatsApp number.</p>';
-        return;
-      }
-
-      if (message.length === 0) {
-        responseDiv.innerHTML = '<p class="text-red-500">Message cannot be empty.</p>';
-        return;
-      }
-
-      // Show loading message
-      responseDiv.innerHTML = '<p class="text-gray-500">Sending message...</p>';
-
+    /**
+     * Fetch and update the sessions list
+     */
+    async function fetchSessions() {
       try {
-        const res = await fetch('https://wa.medblisss.com/send-text', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            token: token,
-            number: number,
-            message: message
-          })
-        });
+        const res = await fetch(apiBase + '/sessions');
+        const data = await res.json();
+        const sessionsBody = document.getElementById('sessionsBody');
+        sessionsBody.innerHTML = '';
 
-        if (!res.ok) {
-          const errorData = await res.json();
-          throw new Error(errorData.message || 'Failed to send message.');
+        if (!data.sessions || data.sessions.length === 0) {
+          sessionsBody.innerHTML = '<tr><td colspan="3" class="px-4 py-2 text-center">No active sessions</td></tr>';
+          return;
         }
 
+        data.sessions.forEach(session => {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td class="px-4 py-2">${session.token}</td>
+            <td class="px-4 py-2">${session.status}</td>
+            <td class="px-4 py-2">
+              <button onclick="viewQR('${session.token}')" class="bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded mr-2">View QR</button>
+              <button onclick="logoutSession('${session.token}')" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded">Logout</button>
+            </td>
+          `;
+          sessionsBody.appendChild(row);
+        });
+      } catch (err) {
+        console.error('Error fetching sessions:', err);
+      }
+    }
+
+    /**
+     * Initialize a new session using the provided phone number
+     */
+    async function initSession(phone) {
+      try {
+        const res = await fetch(apiBase + '/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ number: phone })
+        });
+        return await res.json();
+      } catch (err) {
+        console.error('Error initializing session:', err);
+      }
+    }
+
+    /**
+     * Fetch the QR code for a given session token and display it in a modal
+     */
+    async function viewQR(token) {
+      try {
+        const res = await fetch(apiBase + '/qr/' + token);
         const data = await res.json();
-        responseDiv.innerHTML = '<p class="text-green-500">Message sent successfully!</p>';
-        // Optionally, reset the form
-        document.getElementById('whatsappForm').reset();
-      } catch (error) {
-        responseDiv.innerHTML = `<p class="text-red-500">Error: ${error.message}</p>`;
+        if (data.qr) {
+          document.getElementById('qrToken').innerText = token;
+          // Display the QR code string (could be replaced with a QR code image if needed)
+          document.getElementById('qrContent').innerHTML = `<pre>${data.qr}</pre>`;
+          document.getElementById('qrModal').classList.remove('hidden');
+        } else {
+          alert('No QR code available: ' + (data.message || 'Unknown error.'));
+        }
+      } catch (err) {
+        console.error('Error fetching QR code:', err);
+        alert('Error fetching QR code. Check the console for details.');
+      }
+    }
+
+    /**
+     * Log out (remove) a session by token
+     */
+    async function logoutSession(token) {
+      if (!confirm('Are you sure you want to log out session ' + token + '?')) return;
+      try {
+        const res = await fetch(apiBase + '/logout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token })
+        });
+        const data = await res.json();
+        alert(data.message);
+        fetchSessions();
+      } catch (err) {
+        console.error('Error logging out session:', err);
+      }
+    }
+
+    // Handle form submission to initialize a session
+    document.getElementById('initForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const phoneInput = document.getElementById('phoneNumber');
+      const phone = phoneInput.value.trim();
+      if (!phone) return;
+      const initMessage = document.getElementById('initMessage');
+      initMessage.innerText = 'Initializing session...';
+      const data = await initSession(phone);
+      if (data && data.success) {
+        initMessage.innerText = data.message;
+        phoneInput.value = '';
+        // Refresh sessions list after a short delay so that the session can update its status.
+        setTimeout(fetchSessions, 2000);
+      } else {
+        initMessage.innerText = 'Error: ' + (data.error || 'Unknown error.');
       }
     });
+
+    // Close the QR Code modal
+    document.getElementById('closeModal').addEventListener('click', () => {
+      document.getElementById('qrModal').classList.add('hidden');
+    });
+
+    // Initial fetch of sessions
+    fetchSessions();
+
+    // Optionally refresh sessions every 5 seconds
+    setInterval(fetchSessions, 5000);
   </script>
 </body>
 </html>
