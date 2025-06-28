@@ -14,7 +14,7 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
 });
 
-app.use(cors()); // CORS enabled for all origins
+app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -69,7 +69,8 @@ app.get('/status/:token', (req, res) => {
   res.json({ authenticated: status === 'authenticated', status });
 });
 
-app.get('/qr/:token', (req, res) => {
+// --------- ALWAYS FRESH QR ENDPOINT -----------
+app.get('/qr/:token', async (req, res) => {
   const { token } = req.params;
 
   if (!clientManager.clients.has(token)) {
@@ -77,17 +78,27 @@ app.get('/qr/:token', (req, res) => {
   }
 
   const status = clientManager.getStatus(token);
+
   if (status === 'authenticated') {
     return res.status(400).json({ message: 'Already authenticated.' });
   }
 
-  const qr = clientManager.getQRCode(token);
+  let qr = clientManager.getQRCode(token);
+
+  // If QR not available, force re-init to trigger new QR
   if (!qr) {
-    return res.status(404).json({ message: 'QR code not available at the moment.' });
+    try {
+      await clientManager.removeSession(token);
+      clientManager.initializeClient(token);
+      return res.status(202).json({ message: 'QR expired. Reinitializing session, please try again in a moment.' });
+    } catch (err) {
+      return res.status(500).json({ message: 'Failed to reinitialize session.' });
+    }
   }
 
   res.json({ qr });
 });
+// -----------------------------------------------
 
 app.post('/send-text', async (req, res) => {
   const { token, number, message } = req.body;
