@@ -168,8 +168,14 @@ class ClientManager extends EventEmitter {
       throw new Error('Client not found.');
     }
 
-    await client.logout();
-    client.destroy();
+    try {
+      await client.logout().catch(e => {
+        console.warn(`Logout warning for token ${token}:`, e.message || e);
+      });
+      await client.destroy();
+    } catch (err) {
+      console.warn(`Error during logout/destroy for token ${token}:`, err.message || err);
+    }
 
     this.clients.delete(token);
     this.qrCodes.delete(token);
@@ -177,7 +183,19 @@ class ClientManager extends EventEmitter {
 
     const authDir = path.resolve(this.authBaseDir, token);
     if (fs.existsSync(authDir)) {
-      fs.rmSync(authDir, { recursive: true, force: true });
+      try {
+        fs.rmSync(authDir, { recursive: true, force: true });
+      } catch (err) {
+        if (
+          err.code === 'ENOTEMPTY' ||
+          err.code === 'EBUSY' ||
+          err.code === 'EPERM'
+        ) {
+          console.warn(`Session dir ${authDir} not empty or busy. Manual cleanup may be needed:`, err.message);
+        } else {
+          console.error(`Error deleting session dir ${authDir}:`, err);
+        }
+      }
     }
   }
 }

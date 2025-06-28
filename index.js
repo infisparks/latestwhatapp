@@ -1,14 +1,20 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
-const cors = require('cors'); // <-- 1. Add this line
+const cors = require('cors');
 const ClientManager = require('./ClientManager');
 const app = express();
 const port = 3000;
 
-// 2. Use cors middleware BEFORE your routes
-app.use(cors()); // Allows all origins by default
+// Prevent crashes on unhandled errors
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
 
+app.use(cors()); // CORS enabled for all origins
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -27,9 +33,8 @@ clientManager.on('auth_failure', (token, msg) => {
   console.error(`Authentication failed for ${token}:`, msg);
 });
 
-// Accept only pure numbers for phone tokens/IDs
 const validatePhoneNumber = (number) => {
-  const regex = /^\d{10,15}$/; // only numbers, 10 to 15 digits (E.164 min/max)
+  const regex = /^\d{10,15}$/;
   return regex.test(number);
 };
 
@@ -84,7 +89,6 @@ app.get('/qr/:token', (req, res) => {
   res.json({ qr });
 });
 
-// SEND TEXT with serialize error safety
 app.post('/send-text', async (req, res) => {
   const { token, number, message } = req.body;
 
@@ -101,7 +105,6 @@ app.post('/send-text', async (req, res) => {
   try {
     const result = await clientManager.sendText(token, number, message);
 
-    // If error is serialize bug, return success
     if (
       (result && result.error && result.error.includes("Cannot read properties of undefined (reading 'serialize')")) ||
       (result && result.error && result.error.includes('getMessageModel'))
@@ -114,7 +117,6 @@ app.post('/send-text', async (req, res) => {
     }
     res.status(400).json({ success: false, error: result.error || 'Failed to send message.' });
   } catch (error) {
-    // If thrown error is serialize bug, return success
     if (
       error.message && (
         error.message.includes("Cannot read properties of undefined (reading 'serialize')") ||
@@ -128,7 +130,6 @@ app.post('/send-text', async (req, res) => {
   }
 });
 
-// SEND IMAGE with serialize error safety
 app.post('/send-image-url', async (req, res) => {
   const { token, number, imageUrl, caption } = req.body;
 
