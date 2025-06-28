@@ -1,9 +1,13 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const cors = require('cors'); // <-- 1. Add this line
 const ClientManager = require('./ClientManager');
 const app = express();
 const port = 3000;
+
+// 2. Use cors middleware BEFORE your routes
+app.use(cors()); // Allows all origins by default
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
