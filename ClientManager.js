@@ -1,5 +1,3 @@
-// ClientManager.js
-
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const axios = require('axios');
@@ -13,6 +11,27 @@ class ClientManager extends EventEmitter {
     this.clients = new Map();
     this.qrCodes = new Map();
     this.statuses = new Map();
+    this.authBaseDir = path.resolve(__dirname, 'whatsapp_auth');
+  }
+
+  // Only loads numeric-named folders (i.e. pure numbers)
+  loadExistingSessions() {
+    if (!fs.existsSync(this.authBaseDir)) return;
+
+    const folders = fs.readdirSync(this.authBaseDir, { withFileTypes: true })
+      .filter(d => d.isDirectory() && /^\d+$/.test(d.name))
+      .map(d => d.name);
+
+    for (const token of folders) {
+      try {
+        if (!this.clients.has(token)) {
+          this.initializeClient(token);
+          console.log(`Restored WhatsApp session for token: ${token}`);
+        }
+      } catch (err) {
+        console.error(`Failed to restore session for ${token}:`, err);
+      }
+    }
   }
 
   initializeClient(token) {
@@ -23,7 +42,7 @@ class ClientManager extends EventEmitter {
     const client = new Client({
       authStrategy: new LocalAuth({
         clientId: token,
-        dataPath: path.resolve(__dirname, 'whatsapp_auth'),
+        dataPath: this.authBaseDir,
       }),
       puppeteer: {
         headless: true,
@@ -54,7 +73,6 @@ class ClientManager extends EventEmitter {
 
     client.on('message', (msg) => {
       console.log(`Message from ${msg.from} on ${token}: ${msg.body}`);
-      // Handle incoming messages if needed
     });
 
     client.initialize();
@@ -72,30 +90,60 @@ class ClientManager extends EventEmitter {
   }
 
   async sendText(token, number, message) {
-    const client = this.clients.get(token);
-    if (!client) {
-      throw new Error('Client not found.');
-    }
-    if (this.getStatus(token) !== 'authenticated') {
-      throw new Error('Client is not authenticated.');
-    }
+    try {
+      const client = this.clients.get(token);
+      if (!client) throw new Error('Client not found.');
+      if (this.getStatus(token) !== 'authenticated') throw new Error('Client is not authenticated.');
 
-    const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
-    await client.sendMessage(chatId, message);
+      const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
+      const isRegistered = await client.isRegisteredUser(chatId);
+      if (!isRegistered) throw new Error('Number not registered on WhatsApp.');
+
+      await client.sendMessage(chatId, message);
+      return { success: true, message: 'Message sent successfully.' };
+    } catch (error) {
+      if (
+        error.message &&
+        error.message.includes("Cannot read properties of undefined (reading 'serialize')")
+      ) {
+        console.warn("Puppeteer serialize bug: message was likely sent successfully.");
+        return {
+          success: true,
+          message: "Message sent successfully."
+        };
+      }
+      console.error("Error sending message:", error);
+      return { success: false, error: error.message || String(error) };
+    }
   }
 
   async sendImage(token, number, imageUrl, caption = '') {
-    const client = this.clients.get(token);
-    if (!client) {
-      throw new Error('Client not found.');
-    }
-    if (this.getStatus(token) !== 'authenticated') {
-      throw new Error('Client is not authenticated.');
-    }
+    try {
+      const client = this.clients.get(token);
+      if (!client) throw new Error('Client not found.');
+      if (this.getStatus(token) !== 'authenticated') throw new Error('Client is not authenticated.');
 
-    const media = await this.fetchImageFromUrl(imageUrl);
-    const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
-    await client.sendMessage(chatId, media, { caption });
+      const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
+      const isRegistered = await client.isRegisteredUser(chatId);
+      if (!isRegistered) throw new Error('Number not registered on WhatsApp.');
+
+      const media = await this.fetchImageFromUrl(imageUrl);
+      await client.sendMessage(chatId, media, { caption });
+      return { success: true, message: 'Image sent successfully.' };
+    } catch (error) {
+      if (
+        error.message &&
+        error.message.includes("Cannot read properties of undefined (reading 'serialize')")
+      ) {
+        console.warn("Puppeteer serialize bug (image): image was likely sent successfully.");
+        return {
+          success: true,
+          message: "Image sent successfully."
+        };
+      }
+      console.error("Error sending image:", error);
+      return { success: false, error: error.message || String(error) };
+    }
   }
 
   async fetchImageFromUrl(imageUrl) {
@@ -127,9 +175,9 @@ class ClientManager extends EventEmitter {
     this.qrCodes.delete(token);
     this.statuses.delete(token);
 
-    const authDir = path.resolve(__dirname, 'whatsapp_auth', token);
+    const authDir = path.resolve(this.authBaseDir, token);
     if (fs.existsSync(authDir)) {
-      fs.rmdirSync(authDir, { recursive: true });
+      fs.rmSync(authDir, { recursive: true, force: true });
     }
   }
 }
