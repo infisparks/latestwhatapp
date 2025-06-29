@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>QR Code Fetcher</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 50px;
+      background: #f2f2f2;
+    }
+
+    h1 {
+      margin-bottom: 20px;
+    }
+
+    input, button {
+      padding: 10px;
+      font-size: 16px;
+      margin: 5px;
+    }
+
+    #qrcode {
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Fetch & Show QR Code</h1>
+  <input type="text" id="tokenInput" placeholder="Enter token (e.g. 99583991572)">
+  <button onclick="fetchQRCode()">Get QR Code</button>
+  <div id="qrcode"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script>
+    // On load, check URL for token and auto-fetch
+    document.addEventListener('DOMContentLoaded', () => {
+      const params = new URLSearchParams(window.location.search);
+      // Try to get named parameter 'token'
+      let token = params.get('token');
+      // If no named param, fallback to raw query string (e.g. ?99583991572)
+      const raw = window.location.search.substring(1);
+      if (!token && raw && !raw.includes('=')) {
+        token = raw;
+      }
+      if (token) {
+        document.getElementById('tokenInput').value = token;
+        fetchQRCode();
+      }
+    });
+
+    function fetchQRCode() {
+      const token = document.getElementById('tokenInput').value.trim();
+      if (!token) {
+        alert('Please enter a token.');
+        return;
+      }
+
+      const apiUrl = `http://localhost:3000/qr/${token}`;
+
+      fetch(apiUrl)
+        .then(res => res.json())
+        .then(data => {
+          const qrText = data.qr;
+          document.getElementById('qrcode').innerHTML = '';
+          new QRCode(document.getElementById('qrcode'), {
+            text: qrText,
+            width: 256,
+            height: 256
+          });
+        })
+        .catch(err => {
+          console.error(err);
+          alert('Failed to fetch QR code.');
+        });
+    }
+  </script>
+</body>
+</html>

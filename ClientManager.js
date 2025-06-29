@@ -11,27 +11,6 @@ class ClientManager extends EventEmitter {
     this.clients = new Map();
     this.qrCodes = new Map();
     this.statuses = new Map();
-    this.authBaseDir = path.resolve(__dirname, 'whatsapp_auth');
-  }
-
-  // Only loads numeric-named folders (i.e. pure numbers)
-  loadExistingSessions() {
-    if (!fs.existsSync(this.authBaseDir)) return;
-
-    const folders = fs.readdirSync(this.authBaseDir, { withFileTypes: true })
-      .filter(d => d.isDirectory() && /^\d+$/.test(d.name))
-      .map(d => d.name);
-
-    for (const token of folders) {
-      try {
-        if (!this.clients.has(token)) {
-          this.initializeClient(token);
-          console.log(`Restored WhatsApp session for token: ${token}`);
-        }
-      } catch (err) {
-        console.error(`Failed to restore session for ${token}:`, err);
-      }
-    }
   }
 
   initializeClient(token) {
@@ -42,7 +21,7 @@ class ClientManager extends EventEmitter {
     const client = new Client({
       authStrategy: new LocalAuth({
         clientId: token,
-        dataPath: this.authBaseDir,
+        dataPath: path.resolve(__dirname, 'whatsapp_auth'),
       }),
       puppeteer: {
         headless: true,
@@ -89,60 +68,46 @@ class ClientManager extends EventEmitter {
     return this.statuses.get(token) || 'unknown';
   }
 
+  // PATCHED: Handle serialize error
   async sendText(token, number, message) {
+    const client = this.clients.get(token);
+    if (!client) throw new Error('Client not found.');
+    if (this.getStatus(token) !== 'authenticated') throw new Error('Client is not authenticated.');
+    const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
     try {
-      const client = this.clients.get(token);
-      if (!client) throw new Error('Client not found.');
-      if (this.getStatus(token) !== 'authenticated') throw new Error('Client is not authenticated.');
-
-      const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
-      const isRegistered = await client.isRegisteredUser(chatId);
-      if (!isRegistered) throw new Error('Number not registered on WhatsApp.');
-
       await client.sendMessage(chatId, message);
-      return { success: true, message: 'Message sent successfully.' };
+      return { sent: true };
     } catch (error) {
       if (
-        error.message &&
+        typeof error.message === 'string' &&
         error.message.includes("Cannot read properties of undefined (reading 'serialize')")
       ) {
-        console.warn("Puppeteer serialize bug: message was likely sent successfully.");
-        return {
-          success: true,
-          message: "Message sent successfully."
-        };
+        console.warn('Warning: Serialize error after message sent. Treating as success.');
+        return { sent: true, warning: 'Serialize error after send' };
       }
-      console.error("Error sending message:", error);
-      return { success: false, error: error.message || String(error) };
+      throw error;
     }
   }
 
+  // PATCHED: Handle serialize error
   async sendImage(token, number, imageUrl, caption = '') {
+    const client = this.clients.get(token);
+    if (!client) throw new Error('Client not found.');
+    if (this.getStatus(token) !== 'authenticated') throw new Error('Client is not authenticated.');
+    const media = await this.fetchImageFromUrl(imageUrl);
+    const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
     try {
-      const client = this.clients.get(token);
-      if (!client) throw new Error('Client not found.');
-      if (this.getStatus(token) !== 'authenticated') throw new Error('Client is not authenticated.');
-
-      const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
-      const isRegistered = await client.isRegisteredUser(chatId);
-      if (!isRegistered) throw new Error('Number not registered on WhatsApp.');
-
-      const media = await this.fetchImageFromUrl(imageUrl);
       await client.sendMessage(chatId, media, { caption });
-      return { success: true, message: 'Image sent successfully.' };
+      return { sent: true };
     } catch (error) {
       if (
-        error.message &&
+        typeof error.message === 'string' &&
         error.message.includes("Cannot read properties of undefined (reading 'serialize')")
       ) {
-        console.warn("Puppeteer serialize bug (image): image was likely sent successfully.");
-        return {
-          success: true,
-          message: "Image sent successfully."
-        };
+        console.warn('Warning: Serialize error after image sent. Treating as success.');
+        return { sent: true, warning: 'Serialize error after send' };
       }
-      console.error("Error sending image:", error);
-      return { success: false, error: error.message || String(error) };
+      throw error;
     }
   }
 
@@ -168,34 +133,16 @@ class ClientManager extends EventEmitter {
       throw new Error('Client not found.');
     }
 
-    try {
-      await client.logout().catch(e => {
-        console.warn(`Logout warning for token ${token}:`, e.message || e);
-      });
-      await client.destroy();
-    } catch (err) {
-      console.warn(`Error during logout/destroy for token ${token}:`, err.message || err);
-    }
+    await client.logout();
+    client.destroy();
 
     this.clients.delete(token);
     this.qrCodes.delete(token);
     this.statuses.delete(token);
 
-    const authDir = path.resolve(this.authBaseDir, token);
+    const authDir = path.resolve(__dirname, 'whatsapp_auth', token);
     if (fs.existsSync(authDir)) {
-      try {
-        fs.rmSync(authDir, { recursive: true, force: true });
-      } catch (err) {
-        if (
-          err.code === 'ENOTEMPTY' ||
-          err.code === 'EBUSY' ||
-          err.code === 'EPERM'
-        ) {
-          console.warn(`Session dir ${authDir} not empty or busy. Manual cleanup may be needed:`, err.message);
-        } else {
-          console.error(`Error deleting session dir ${authDir}:`, err);
-        }
-      }
+      fs.rmdirSync(authDir, { recursive: true });
     }
   }
 }
