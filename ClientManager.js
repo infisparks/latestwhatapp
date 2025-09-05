@@ -27,8 +27,16 @@ class ClientManager extends EventEmitter {
       }),
       puppeteer: {
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      },
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--disable-gpu',
+            '--single-process',
+            '--no-zygote'
+        ],
+    },
     });
 
     client.on('qr', (qr) => {
