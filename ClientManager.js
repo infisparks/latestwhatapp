@@ -13,14 +13,15 @@ class ClientManager extends EventEmitter {
     this.clients = new Map();
     this.qrCodes = new Map();
     this.statuses = new Map();
+    this.pairingCodes = new Map(); // New Map to store pairing codes
   }
 
-  initializeClient(token) {
+  initializeClient(token, pairWithNumber = null) {
     if (this.clients.has(token)) {
       throw new Error('Client with this token already exists.');
     }
 
-    const client = new Client({
+    const clientOptions = {
       authStrategy: new LocalAuth({
         clientId: token,
         dataPath: path.resolve(__dirname, 'whatsapp_auth'),
@@ -36,8 +37,15 @@ class ClientManager extends EventEmitter {
             '--single-process',
             '--no-zygote'
         ],
-    },
-    });
+      },
+    };
+
+    // Use pairWithPhoneNumber if a number is provided
+    if (pairWithNumber) {
+      clientOptions.pairWithPhoneNumber = pairWithNumber;
+    }
+
+    const client = new Client(clientOptions);
 
     client.on('qr', (qr) => {
       console.log(`QR RECEIVED for ${token}`);
@@ -46,10 +54,17 @@ class ClientManager extends EventEmitter {
       this.emit('qr', token, qr);
     });
 
+    client.on('code', (code) => {
+      console.log(`PAIRING CODE RECEIVED for ${token}: ${code}`);
+      this.pairingCodes.set(token, code);
+      this.emit('code', token, code);
+    });
+
     client.on('ready', () => {
       console.log(`WhatsApp Client ${token} is ready!`);
       this.statuses.set(token, 'authenticated');
       this.qrCodes.delete(token);
+      this.pairingCodes.delete(token); // Clear pairing code on success
       this.emit('ready', token);
     });
 
@@ -57,6 +72,7 @@ class ClientManager extends EventEmitter {
       console.error(`AUTHENTICATION FAILURE for ${token}:`, msg);
       this.statuses.set(token, 'auth_failure');
       this.qrCodes.delete(token);
+      this.pairingCodes.delete(token);
       this.emit('auth_failure', token, msg);
     });
 
@@ -73,6 +89,11 @@ class ClientManager extends EventEmitter {
 
   getQRCode(token) {
     return this.qrCodes.get(token) || null;
+  }
+  
+  // New method to retrieve the pairing code
+  getPairingCode(token) {
+    return this.pairingCodes.get(token) || null;
   }
 
   getStatus(token) {
@@ -133,6 +154,7 @@ class ClientManager extends EventEmitter {
 
     this.clients.delete(token);
     this.qrCodes.delete(token);
+    this.pairingCodes.delete(token);
     this.statuses.delete(token);
 
     const authDir = path.resolve(__dirname, 'whatsapp_auth', token);

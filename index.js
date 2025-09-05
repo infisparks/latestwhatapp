@@ -4,21 +4,19 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const ClientManager = require('./ClientManager');
-const app = express();
 const cors = require('cors');
+const app = express();
 const port = 3000;
 
-// Middleware to parse JSON and URL-encoded data
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
+// Configure CORS
 const corsOptions = {
   origin: 'https://infisparks.github.io'
 };
 app.use(cors(corsOptions));
 
-
-
+// Middleware to parse JSON and URL-encoded data
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Initialize ClientManager
 const clientManager = new ClientManager();
@@ -26,7 +24,10 @@ const clientManager = new ClientManager();
 // Listen to events from ClientManager
 clientManager.on('qr', (token, qr) => {
   console.log(`QR for ${token}: ${qr}`);
-  // Implement additional logic if needed
+});
+
+clientManager.on('code', (token, code) => {
+    console.log(`Pairing code for ${token}: ${code}`);
 });
 
 clientManager.on('ready', (token) => {
@@ -43,26 +44,50 @@ const validatePhoneNumber = (number) => {
   return regex.test(number);
 };
 
-// Endpoint to add a new session (initialize a client)
-app.post('/sessions', (req, res) => {
-  const { number } = req.body;
+// New endpoint for pairing with a phone number and returning the code in the response
+app.post('/pair', async (req, res) => {
+    const { number, token } = req.body;
 
-  if (!number) {
-    return res.status(400).json({ success: false, error: 'Phone number is required.' });
-  }
+    if (!number || !token) {
+        return res.status(400).json({ success: false, error: 'Phone number and token are required.' });
+    }
 
-  if (!validatePhoneNumber(number)) {
-    return res.status(400).json({ success: false, error: 'Invalid phone number format.' });
-  }
+    if (!validatePhoneNumber(number)) {
+        return res.status(400).json({ success: false, error: 'Invalid phone number format.' });
+    }
 
-  const token = number; // Using phone number as token
+    try {
+        // First, check if a client with this token already exists to avoid re-initializing.
+        if (clientManager.clients.has(token)) {
+             const existingCode = clientManager.getPairingCode(token);
+             if (existingCode) {
+                 return res.status(200).json({ success: true, message: 'Client session already initializing.', pairingCode: existingCode });
+             }
+        }
 
-  try {
-    clientManager.initializeClient(token);
-    res.json({ success: true, message: 'Session initialized. Please authenticate using the QR code.' });
-  } catch (error) {
-    res.status(400).json({ success: false, error: error.message });
-  }
+        // Initialize the client with the phone number for pairing
+        clientManager.initializeClient(token, { phoneNumber: number });
+        
+        // Wait for the 'code' event to be emitted
+        const pairingCode = await new Promise((resolve) => {
+            const onCode = (emittedToken, code) => {
+                if (emittedToken === token) {
+                    clientManager.removeListener('code', onCode);
+                    resolve(code);
+                }
+            };
+            clientManager.on('code', onCode);
+        });
+
+        res.json({ 
+            success: true, 
+            message: 'Pairing code generated. Enter this code on your phone to link your device.', 
+            pairingCode 
+        });
+
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
 });
 
 /**
@@ -108,9 +133,9 @@ app.get('/qr/:token', (req, res) => {
  * Endpoint to send text message
  * POST /send-text
  * Body Parameters:
- *  - token: string (phone number)
- *  - number: string (recipient's number)
- *  - message: string (message to send)
+ * - token: string (phone number)
+ * - number: string (recipient's number)
+ * - message: string (message to send)
  */
 app.post('/send-text', async (req, res) => {
   const { token, number, message } = req.body;
@@ -140,10 +165,10 @@ app.post('/send-text', async (req, res) => {
  * Endpoint to send image via URL
  * POST /send-image-url
  * Body Parameters:
- *  - token: string (phone number)
- *  - number: string (recipient's number)
- *  - imageUrl: string (URL of the image to send)
- *  - caption: string (optional)
+ * - token: string (phone number)
+ * - number: string (recipient's number)
+ * - imageUrl: string (URL of the image to send)
+ * - caption: string (optional)
  */
 app.post('/send-image-url', async (req, res) => {
   const { token, number, imageUrl, caption } = req.body;
@@ -173,7 +198,7 @@ app.post('/send-image-url', async (req, res) => {
  * Endpoint to list all active sessions
  * GET /sessions
  * Response:
- *  - Array of tokens with their status
+ * - Array of tokens with their status
  */
 app.get('/sessions', (req, res) => {
   const sessions = clientManager.listSessions().map((token) => ({
@@ -207,7 +232,7 @@ app.delete('/sessions/:token', async (req, res) => {
  * Optional: Endpoint to log out a specific client
  * POST /logout
  * Body Parameters:
- *  - token: string (phone number)
+ * - token: string (phone number)
  */
 app.post('/logout', async (req, res) => {
   const { token } = req.body;
