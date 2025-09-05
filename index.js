@@ -5,11 +5,17 @@ const path = require('path');
 const fs = require('fs');
 const ClientManager = require('./ClientManager');
 const app = express();
+const cors = require('cors');
 const port = 3000;
 
 // Middleware to parse JSON and URL-encoded data
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+app.use(cors()); // ✅ Add this line
+
+
+
 
 // Initialize ClientManager
 const clientManager = new ClientManager();
