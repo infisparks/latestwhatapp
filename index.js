@@ -12,7 +12,10 @@ const port = 3000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use(cors()); // ✅ Add this line
+const corsOptions = {
+  origin: 'https://infisparks.github.io'
+};
+app.use(cors(corsOptions));
 
 
 
