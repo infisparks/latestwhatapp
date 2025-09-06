@@ -1,5 +1,3 @@
-// index.js
-
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -8,20 +6,19 @@ const cors = require('cors');
 const app = express();
 const port = 3000;
 
-// Configure CORS
-const corsOptions = {
-  origin: 'https://infisparks.github.io'
-};
-app.use(cors(corsOptions));
+// Enable CORS for all origins. This allows any frontend to connect to this API.
+// To restrict it to a specific origin, you would pass an options object, e.g.,
+// app.use(cors({ origin: 'https://your-domain.com' }));
+app.use(cors());
 
-// Middleware to parse JSON and URL-encoded data
+// Middleware to parse JSON and URL-encoded data from incoming requests
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Initialize ClientManager
+// Initialize ClientManager to handle WhatsApp sessions
 const clientManager = new ClientManager();
 
-// Listen to events from ClientManager
+// Listen to events from ClientManager and log them to the console
 clientManager.on('qr', (token, qr) => {
   console.log(`QR for ${token}: ${qr}`);
 });
@@ -38,9 +35,9 @@ clientManager.on('auth_failure', (token, msg) => {
   console.error(`Authentication failed for ${token}:`, msg);
 });
 
-// Helper function to validate phone number format
+// Helper function to validate phone number format (E.164)
 const validatePhoneNumber = (number) => {
-  const regex = /^\+?[1-9]\d{1,14}$/; // E.164 format
+  const regex = /^\+?[1-9]\d{1,14}$/;
   return regex.test(number);
 };
 
@@ -256,5 +253,5 @@ app.post('/logout', async (req, res) => {
 
 // Start the server
 app.listen(port, () => {
-  console.log(`WhatsApp API server running at http://localhost:${port}`);
+  console.log(`WhatsApp API server running at http://localhost:${port}`); 
 });
